@@ -1,3 +1,4 @@
+import { isReadingStale, recordedDate } from '../readingFreshness'
 import {
   Activity,
   Bot,
@@ -1437,7 +1438,8 @@ export function OverviewPage({
   const showDecisionPanels = !isMonitoringOnly && (hasDose || !isWithinRange)
   const cropReferenceDate = referenceTime ? new Date(referenceTime) : undefined
   const cropLifecycle = cropLifecycleFromSettings(systemSettings, cropReferenceDate)
-  const hero = heroContent(
+  const staleReading = isReadingStale(latestLog.timestamp)
+  const hero = staleReading && !systemSettings?.emergency_stop_enabled ? { tone: 'warn' as const, title: 'Latest recorded reading', body: `Recorded ${recordedDate(latestLog.timestamp)}. Waiting for fresh sensor data; this saved decision does not establish current hardware status.`, icon: 'i' } : heroContent(
     latestLog,
     cycle,
     systemSettings?.emergency_stop_enabled === true,
@@ -1446,15 +1448,15 @@ export function OverviewPage({
   )
   const heroStatus = latestLog.status || cycle.status
   const isPendingHITL = isHITLPending(cycle.status, latestLog.decision)
-  const mergeCorrectionContext = showAiContext && heroStatus.toLowerCase() === 'dosing'
-  const showHeroStatus = heroStatus.toLowerCase() !== 'dosing'
+  const mergeCorrectionContext = !staleReading && showAiContext && heroStatus.toLowerCase() === 'dosing'
+  const showHeroStatus = !staleReading && heroStatus.toLowerCase() !== 'dosing'
 
   return (
     <section className="page-content overview-page">
       {isHITLState(cycle.status, latestLog.decision) && !isPendingHITL && (
         <HITLAlert cycle={cycle} decision={latestLog.decision} onNavigate={onNavigate} />
       )}
-      {!mergeCorrectionContext && !isPendingHITL && (
+      {(!staleReading || systemSettings?.emergency_stop_enabled) && !mergeCorrectionContext && !isPendingHITL && (
         <StatusHero
           tone={hero.tone}
           title={hero.title}
@@ -1464,7 +1466,7 @@ export function OverviewPage({
         />
       )}
 
-      {showAiContext && (
+      {showAiContext && !staleReading && (
         <OverviewAIContext
           latestLog={latestLog}
           cycle={cycle}
@@ -1482,7 +1484,7 @@ export function OverviewPage({
           tone={phTone(latestLog.ph, phTarget)}
           target={`Target ${phTarget.min} - ${phTarget.max}`}
           deviation={deviationLabel(latestLog.ph, latestLog.ph_deviation, phTarget)}
-          footer="Confirmed stable reading"
+          footer={staleReading ? 'Historical reading' : 'Recorded stability confirmed'}
           accent
           icon={<Activity size={15} strokeWidth={2.2} />}
         />
@@ -1493,7 +1495,7 @@ export function OverviewPage({
           tone={ecTone(latestLog.ec, ecTarget)}
           target={`Target ${ecTarget.min} - ${ecTarget.max} mS/cm`}
           deviation={deviationLabel(latestLog.ec, latestLog.ec_deviation, ecTarget, ' mS/cm')}
-          footer="Confirmed stable reading"
+          footer={staleReading ? 'Historical reading' : 'Recorded stability confirmed'}
           accent
           icon={<Gauge size={15} strokeWidth={2.2} />}
         />
@@ -1504,7 +1506,7 @@ export function OverviewPage({
           tone={tempTone(latestLog.temperature)}
           target="Optimal range 18 - 26°C"
           deviation={tempTone(latestLog.temperature) === 'good' ? 'Within optimal range' : 'Higher temps reduce dissolved O₂'}
-          footer={tempTone(latestLog.temperature) === 'good' ? 'Current sensor reading' : 'Informational warning'}
+          footer={staleReading ? 'Historical temperature' : tempTone(latestLog.temperature) === 'good' ? 'Latest recorded temperature' : 'Informational warning'}
           icon={<Thermometer size={15} strokeWidth={2.2} />}
         />
         <MetricCard

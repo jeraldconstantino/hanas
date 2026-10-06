@@ -1,3 +1,4 @@
+import { isReadingStale, recordedDate } from './readingFreshness'
 import { emptyLog, emptyCycle } from './emptyState'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Loader2, Settings2 } from 'lucide-react'
@@ -799,7 +800,7 @@ function DashboardApp({ initialPage = 'Overview' }: { initialPage?: Page }) {
         <SystemModeBanner monitoring onSettings={handleReviewSystemSettings} />
       )}
 
-      {connectionState !== 'offline' && (
+      {connectionState !== 'offline' && !isReadingStale(latestLog.timestamp) && (
         <ActiveOperationBar
           cycle={operationCycle}
           latestLog={latestLog}
@@ -809,6 +810,14 @@ function DashboardApp({ initialPage = 'Overview' }: { initialPage?: Page }) {
         />
       )}
 
+      {connectionState === 'connected' && latestLog.timestamp && isReadingStale(latestLog.timestamp) && (
+        <section className="maintenance-banner" role="status">
+          <div>
+            <strong>Readings are stale</strong>
+            <p>Last reading: {recordedDate(latestLog.timestamp)}. Showing saved data. Awaiting fresh sensor readings.</p>
+          </div>
+        </section>
+      )}
       {isConnectingAndNotSettings && <EmptyState connecting />}
       {connectionState === 'offline' && activePage !== 'Settings' && (
         <EmptyState
@@ -823,7 +832,7 @@ function DashboardApp({ initialPage = 'Overview' }: { initialPage?: Page }) {
       )}
       {isEmptyAndNotSettings && <EmptyState maintenanceMode={maintenanceMode} emergencyStop={emergencyStop} />}
 
-      {!isEmptyAndNotSettings && !isConnectingAndNotSettings && connectionState !== 'offline' && (
+      {!isEmptyAndNotSettings && !isConnectingAndNotSettings && (connectionState !== 'offline' || activePage === 'Settings') && (
         <>
           {activePage === 'Overview' && (
             <OverviewPage

@@ -526,6 +526,10 @@ function HistoryChart({
     })
   }
 
+  if (data.length === 0) {
+    return <Panel title={title} eyebrow={eyebrow} badge={timeframe} className="history-chart-panel"><div className="trend-chart-empty"><strong>No readings in this range</strong><p>Select a wider time range or the crop cycle to view older readings.</p></div></Panel>
+  }
+
   return (
     <Panel title={title} eyebrow={eyebrow} badge={timeframe} className="history-chart-panel">
       <div className="chart-outer">
@@ -804,6 +808,10 @@ function CompactChart({
   const targetBottom = targetBand ? 68 - clamp(((targetBand.min - min) / chartRange) * 56, 0, 56) : 0
   const targetY = Math.min(targetTop, targetBottom)
   const targetHeight = Math.max(1.5, Math.abs(targetBottom - targetTop))
+
+  if (data.length === 0) {
+    return <Panel title={title} className="span-6 compact-chart"><div className="trend-chart-empty"><strong>{doseEvents ? 'No dosing events in this range' : 'No temperature readings in this range'}</strong><p>{doseEvents ? 'Recorded doses will appear here when available.' : 'Select a wider time range or the crop cycle to view older readings.'}</p></div></Panel>
+  }
 
   return (
     <Panel title={title} className={`span-6 compact-chart ${mode}${stats && stats.length > 0 ? ' has-stats' : ''}${doseEvents ? ' dose-chart' : ''}`}>

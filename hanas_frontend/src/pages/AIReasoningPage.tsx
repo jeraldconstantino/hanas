@@ -1,3 +1,4 @@
+import { isReadingStale, recordedDate } from '../readingFreshness'
 import { Bot, BrainCircuit, CheckCircle2, Clock3, GitBranch, ShieldCheck } from 'lucide-react'
 import type { LatestLog, ControlCycle, BatchStatus } from '../types'
 import { deviationLabel, formatCountdown, formatDoseMl, formatDuration, formatPumpDuration, formatTime } from '../utils'
@@ -677,7 +678,7 @@ export function AIReasoningPage({
               : isEmergencyGuard
               ? 'Deterministic emergency guard handled this reading'
               : isAgentic
-              ? reasoningHeading(latestLog, meta)
+              ? isReadingStale(latestLog.timestamp) ? `Saved decision · ${recordedDate(latestLog.timestamp)}` : reasoningHeading(latestLog, meta)
               : `Rule-based decision: ${label(latestLog.decision)}`}
           </h2>
           <p>

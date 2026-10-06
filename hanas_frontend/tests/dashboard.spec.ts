@@ -1852,3 +1852,29 @@ test('dashboard loads when browser storage access is blocked', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Review system mode settings' })).toBeVisible()
   expect(errors).toEqual([])
 })
+
+
+test('offline connection settings remain accessible from the recovery button', async ({ page }) => {
+  await page.route('**/api/**', route => route.abort())
+  await page.goto('http://127.0.0.1:4173/?page=overview')
+  await page.getByRole('button', { name: 'Connection settings', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Connection settings', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'System API URL' })).toBeVisible()
+  await expect(page.locator('#settings-connection').getByRole('button', { name: 'Apply', exact: true })).toBeVisible()
+})
+
+test('stale readings are historical and do not predict another sensor sample', async ({ page }) => {
+  const fixture = createDashboardFixture()
+  const oldLog = { ...fixture.latestLog, timestamp: '2026-01-01T00:00:00Z' }
+  await mockDashboard(page, fixture)
+  await page.route('**/api/system-logs/latest', route => route.fulfill({ json: oldLog }))
+  await page.goto('http://127.0.0.1:4173/?page=overview')
+  await expect(page.getByText('Readings are stale', { exact: true })).toBeVisible()
+  await expect(page.getByText('Readings are stale', { exact: true })).toHaveCount(1)
+  await expect(page.getByRole('heading', { name: 'Latest recorded reading', exact: true })).toHaveCount(0)
+  await expect(page.getByText('Current sensor reading', { exact: true })).toHaveCount(0)
+  await page.goto('http://127.0.0.1:4173/?page=reservoir')
+  await expect(page.getByText('Sensor updates overdue', { exact: true })).toBeVisible()
+  await expect(page.getByText('Next reading in', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Sensor Signal Quality', { exact: true })).toHaveCount(0)
+})

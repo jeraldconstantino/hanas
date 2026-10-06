@@ -25501,6 +25501,7 @@ th,
 
 .empty-state-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
   margin-top: 18px;
@@ -25511,7 +25512,27 @@ th,
   min-height: 42px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  padding: 0 14px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--on-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.empty-state-actions button:hover {
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
+}
+
+.empty-state-actions button.secondary:hover {
+  background: var(--surface-soft);
+  border-color: var(--primary-border);
 }
 
 .empty-state-actions button.secondary {
@@ -28556,3 +28577,14 @@ th,
     grid-column: span 3 !important;
   }
 }
+
+.trend-chart-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--ink-muted);
+  background: var(--surface-soft);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+}
+.trend-chart-empty strong { color: var(--ink); }
+.trend-chart-empty p { margin: 8px 0 0; font-size: var(--text-sm); }

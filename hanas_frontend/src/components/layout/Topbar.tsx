@@ -96,9 +96,9 @@ export function Topbar({
       <div className="topbar-title-block">
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
-        <time className="timestamp" dateTime={lastUpdated} title={`Last updated ${formatTime(lastUpdated)}`}>
+        <time className="timestamp" dateTime={lastUpdated} title={`Dashboard refreshed ${formatTime(lastUpdated)}`}>
           <Clock3 size={13} strokeWidth={2.2} />
-          <span>Updated {formatTime(lastUpdated)}</span>
+          <span>Refreshed {formatTime(lastUpdated)}</span>
         </time>
       </div>
       <div className="topbar-actions">

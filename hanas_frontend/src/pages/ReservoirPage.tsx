@@ -1,7 +1,8 @@
+import { isReadingStale, recordedDate } from '../readingFreshness'
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { TrendingUp } from 'lucide-react'
 import type { LatestLog, Page, Tone } from '../types'
-import { clamp, deviationLabel, formatDuration, formatTime, phTone, ecTone, phStatus, ecStatus } from '../utils'
+import { clamp, deviationLabel, formatDuration, phTone, ecTone, phStatus, ecStatus } from '../utils'
 import { Pill } from '../components/ui/Pill'
 import { Panel } from '../components/ui/Panel'
 import { InfoCell } from '../components/ui/InfoCell'
@@ -188,7 +189,7 @@ function ReadingMeta({ latestLog }: { latestLog: LatestLog }) {
     return formatDuration(seconds)
   }
   const items: Array<[string, string]> = [
-    ['Last reading', formatTime(latestLog.timestamp)],
+    ['Last reading', recordedDate(latestLog.timestamp)],
     ['pH stable for', stableLabel(latestLog.ph_stable_for_seconds)],
     ['EC stable for', stableLabel(latestLog.ec_stable_for_seconds)],
     ['Threshold', '±0.03'],
@@ -223,6 +224,9 @@ function CountdownPanel({
     return () => window.clearInterval(timer)
   }, [referenceTime])
 
+  if (isReadingStale(latestTimestamp, referenceMs)) {
+    return <article className="countdown-panel span-4"><span>Sensor updates overdue</span><strong>Awaiting reading</strong><p>Last recorded: {recordedDate(latestTimestamp)}. No next-reading time is confirmed.</p></article>
+  }
   return (
     <article
       className="countdown-panel span-4"
@@ -316,7 +320,7 @@ export function ReservoirPage({
             statusLabel={ecStatus(latestLog.ec, ecTarget)}
           />
           <ReadingMeta latestLog={latestLog} />
-          <SignalStrip className="signal-strip-desktop" onNavigate={onNavigate} />
+          {!isReadingStale(latestLog.timestamp) && <SignalStrip className="signal-strip-desktop" onNavigate={onNavigate} />}
         </div>
 
         <div className="reservoir-right">
@@ -324,7 +328,7 @@ export function ReservoirPage({
           <CountdownPanel latestTimestamp={latestLog.timestamp} referenceTime={referenceTime} />
         </div>
 
-        <SignalStrip className="signal-strip-compact" onNavigate={onNavigate} />
+        {!isReadingStale(latestLog.timestamp) && <SignalStrip className="signal-strip-compact" onNavigate={onNavigate} />}
       </div>
     </section>
   )

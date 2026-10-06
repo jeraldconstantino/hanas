@@ -74,8 +74,8 @@ export function Sidebar({
     ? 'Live Readings • AI and Pumps Paused'
     : connectionState === 'connected'
       ? fullAgenticMode
-        ? 'Full Agentic Mode • Live Sensor Data'
-        : 'Live Sensor Data'
+        ? 'Full Agentic Mode • Backend connected'
+        : 'Backend connected'
       : connectionState === 'offline'
         ? 'Backend Unavailable • Retrying'
       : connectionState === 'empty'
