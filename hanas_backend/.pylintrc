@@ -1,0 +1,11 @@
+[MAIN]
+recursive = yes
+persistent = no
+
+[MESSAGES CONTROL]
+disable =
+    missing-module-docstring,
+    too-few-public-methods
+
+[FORMAT]
+max-line-length = 100

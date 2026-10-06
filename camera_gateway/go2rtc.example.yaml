@@ -1,0 +1,11 @@
+streams:
+  lettuce_cam:
+    - rtsp://TAPO_USERNAME:TAPO_PASSWORD@TAPO_CAMERA_IP:554/stream1
+  lettuce_cam_low:
+    - rtsp://TAPO_USERNAME:TAPO_PASSWORD@TAPO_CAMERA_IP:554/stream2
+
+api:
+  listen: ":1984"
+
+webrtc:
+  listen: ":8555"

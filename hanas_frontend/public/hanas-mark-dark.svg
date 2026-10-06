@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="HANAS dark-mode icon">
+  <path d="M108 88
+       Q108 72 124 72
+       H164
+       Q180 72 180 88
+       V212
+       Q180 236 202 250
+       L236 272
+       L202 294
+       Q180 308 180 332
+       V424
+       Q180 440 164 440
+       H124
+       Q108 440 108 424
+       Z" fill="#F8FAFC"></path>
+  <path d="M332 88
+       Q332 72 348 72
+       H388
+       Q404 72 404 88
+       V424
+       Q404 440 388 440
+       H348
+       Q332 440 332 424
+       V332
+       Q332 308 310 294
+       L276 272
+       L310 250
+       Q332 236 332 212
+       Z" fill="#F8FAFC"></path>
+  <path d="M256 64
+       C306 112 326 158 312 202
+       C301 238 276 260 256 278
+       C236 260 211 238 200 202
+       C186 158 206 112 256 64
+       Z" fill="#6EE787"></path>
+  <path d="M256 136
+       V266" fill="none" stroke="#0F2F24" stroke-width="10" stroke-linecap="round"></path>
+  <path d="M256 212
+       L226 182" fill="none" stroke="#0F2F24" stroke-width="10" stroke-linecap="round"></path>
+  <path d="M256 220
+       L286 190" fill="none" stroke="#0F2F24" stroke-width="10" stroke-linecap="round"></path>
+  <path d="M256 276
+       C306 326 328 370 312 408
+       C301 434 281 448 256 448
+       C231 448 211 434 200 408
+       C184 370 206 326 256 276
+       Z" fill="#22D3EE"></path>
+</svg>

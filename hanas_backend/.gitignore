@@ -1,0 +1,6 @@
+venv/
+.venv/
+.env
+app/database/database.ini
+__pycache__/
+.pytest_cache/

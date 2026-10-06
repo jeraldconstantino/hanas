@@ -1,0 +1,4 @@
+-r requirements.txt
+pylint
+pytest
+pip==26.2
