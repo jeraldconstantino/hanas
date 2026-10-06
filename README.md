@@ -603,3 +603,8 @@ proposal. These values appear in the planning trace before Safety Gate executes.
 Safety Gate independently recalculates and rejects missing or mismatched
 candidates, including pump misalignment. The ESP32 response fields remain the
 validated final dose, duration, and mixing contract.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
+Copyright (c) 2026 Jerald Constantino.
