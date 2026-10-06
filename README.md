@@ -1,9 +1,11 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="hanas_frontend/public/hanas-mark-dark.svg">
-  <img src="hanas_frontend/public/hanas-mark-light.svg" alt="HANAS logo" width="96" height="96">
-</picture>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="hanas_frontend/public/hanas-mark-dark.svg">
+    <img src="hanas_frontend/public/hanas-mark-light.svg" alt="HANAS logo" width="96" height="96">
+  </picture>
+</p>
 
-# HANAS
+<h1 align="center">HANAS</h1>
 
 HANAS is the Hydroponic Agentic Nutrient Adjustment System. It monitors hydroponic
 pH, EC, water temperature, and reservoir volume readings, records each control
