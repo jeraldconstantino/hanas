@@ -520,6 +520,9 @@ CREATE TABLE control_cycles (
     started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     deviation_detected_at TIMESTAMPTZ,
     action_started_at TIMESTAMPTZ,
+    ec_up_a_started_at TIMESTAMPTZ,
+    inter_dose_mixing_started_at TIMESTAMPTZ,
+    ec_up_b_started_at TIMESTAMPTZ,
     action_completed_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     status VARCHAR(64),
@@ -877,13 +880,22 @@ COMMENT ON COLUMN control_cycles.deviation_detected_at IS
 'Timestamp when an out-of-range pH or EC deviation was detected for the control cycle.';
 
 COMMENT ON COLUMN control_cycles.action_started_at IS
-'Timestamp when the ESP32 reported that the dosing action physically started.';
+'Immutable sequence start reported before pump activation; EC Up starts with Pump A.';
+
+COMMENT ON COLUMN control_cycles.ec_up_a_started_at IS
+'EC Up Pump A stage start (dosing callback).';
+
+COMMENT ON COLUMN control_cycles.inter_dose_mixing_started_at IS
+'EC Up Pump A shutdown and start of the A-to-B mixing interval.';
+
+COMMENT ON COLUMN control_cycles.ec_up_b_started_at IS
+'EC Up Pump B stage start, after inter-dose mixing.';
 
 COMMENT ON COLUMN control_cycles.action_completed_at IS
-'Timestamp when the ESP32 reported that the dosing action physically completed.';
+'Final pump shutdown acknowledgement; for EC Up, after Pump B finishes.';
 
 COMMENT ON COLUMN control_cycles.completed_at IS
-'Timestamp when the control cycle completed, if tracked by the application.';
+'Cycle end after post-dose mixing, or termination on error/interruption; inspect status.';
 
 COMMENT ON COLUMN control_cycles.status IS
 'Current high-level control-cycle status, such as within_range, dosing, mixing, completed, or error.';

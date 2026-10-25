@@ -20,7 +20,7 @@ class ControlCycleActionCompletedPayload(BaseModel):
 class ControlCycleActionStartedPayload(BaseModel):
     """Payload sent when the ESP32 begins the dosing action."""
 
-    status: Literal["dosing", "inter_dose_mixing", "ec_up_b_dosing"] = Field(default="dosing", description="Control-cycle status while actuation is running.")
+    status: Literal["dosing", "inter_dose_mixing", "ec_up_b_dosing"] = Field(default="dosing", description="Execution stage: dosing (Pump A for EC Up), inter_dose_mixing (A off), ec_up_b_dosing (before B starts).")
 
 
 class ControlCycleCompletionResponse(BaseModel):
@@ -84,3 +84,7 @@ class LatestControlCycle(BaseModel):
     mixing_elapsed_seconds: int
     action_started_at: str
     action_completed_at: str | None = None
+    ec_up_a_started_at: str | None = None
+    inter_dose_mixing_started_at: str | None = None
+    ec_up_b_started_at: str | None = None
+    completed_at: str | None = None

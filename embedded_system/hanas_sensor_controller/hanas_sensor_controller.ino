@@ -350,7 +350,7 @@ int pumpPinForName(const String& pumpName);
 bool runDosingCountdown(int pin, unsigned long durationMs, const String& pumpName);
 bool runInterDoseMixingCountdown(unsigned long durationMs);
 void runPumpForDuration(int pin, unsigned long durationMs, unsigned long mixingTimeMs, const String& pumpName);
-void runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long mixingTimeMs);
+bool runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long mixingTimeMs);
 void startMixingPeriod(unsigned long mixingTimeMs);
 void printStatus(float pHValue, float ecValue, float tempC, const WaterLevelReading& waterLevel);
 void printPayloadSummary(const SensorSnapshot& snapshot, const String& payload);
@@ -465,6 +465,10 @@ void loop() {
     Serial.println();
 
     if (currentMixingControlCycleId > 0) {
+      if (!mixingStatusReported) {
+        lastMixingBackendRetryTime = now;
+        return;
+      }
       if (markControlCycleCompleteWithRetry(currentMixingControlCycleId, "completed")) {
         currentMixingControlCycleId = 0;
         mixingStatusReported = false;
@@ -480,6 +484,10 @@ void loop() {
       || now - lastMixingBackendRetryTime >= 5000
     ) {
       lastMixingBackendRetryTime = now;
+      if (!mixingStatusReported) {
+        mixingStatusReported = markControlCycleActionCompleted(currentMixingControlCycleId, "mixing");
+        if (!mixingStatusReported) return;
+      }
       if (markControlCycleCompleteWithRetry(currentMixingControlCycleId, "completed")) {
         currentMixingControlCycleId = 0;
         mixingStatusReported = false;
@@ -656,7 +664,11 @@ bool executeDosingDecision(BackendDecisionSummary& decision) {
   }
 
   if (isEcUpSequence) {
-    runEcUpSequence(decision.controlCycleId, decision.durationMs, decision.mixingTimeMs);
+    if (!runEcUpSequence(decision.controlCycleId, decision.durationMs, decision.mixingTimeMs)) {
+      stopAllPumps();
+      markControlCycleCompleteWithRetry(decision.controlCycleId, emergencyStopLatched ? "emergency_stopped" : "error");
+      return false;
+    }
   } else {
     runPumpForDuration(pumpPin, decision.durationMs, decision.mixingTimeMs, decision.pumpActivated);
   }
@@ -1149,7 +1161,7 @@ void enterMonitoringMode() {
     int interruptedControlCycleId = currentMixingControlCycleId;
     const char* interruptedStatus = emergencyStopLatched
       ? "emergency_stopped"
-      : (isMixing ? "error" : "completed");
+      : "error";
     currentMixingControlCycleId = 0;
     mixingStatusReported = false;
     lastMixingBackendRetryTime = 0;
@@ -2010,7 +2022,7 @@ void runPumpForDuration(
   startMixingPeriod(mixingTimeMs);
 }
 
-void runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long mixingTimeMs) {
+bool runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long mixingTimeMs) {
   stopAllPumps();
 
   Serial.print("Activating ec_up_a for ");
@@ -2019,22 +2031,25 @@ void runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long
 
   if (!runDosingCountdown(EC_UP_A_PUMP_PIN, durationMs, "ec_up_a")) {
     stopAllPumps();
-    return;
+    return false;
   }
   if (controllerMode == MODE_MONITORING) {
     stopAllPumps();
-    return;
+    return false;
   }
 
   Serial.print("Mixing between EC Up A and B for ");
   Serial.print(EC_UP_INTER_DOSE_MIXING_DURATION_MS);
   Serial.println(" ms");
   if (!markControlCycleActionStarted(controlCycleId, "inter_dose_mixing")) {
-    Serial.println("WARNING: Unable to publish EC Up A/B mixing status; continuing the safe mixing delay.");
+    Serial.println("Unable to report EC Up A shutdown. Aborting the sequence before Pump B.");
+    stopAllPumps();
+    enterMonitoringMode();
+    return false;
   }
   if (!runInterDoseMixingCountdown(EC_UP_INTER_DOSE_MIXING_DURATION_MS)) {
     stopAllPumps();
-    return;
+    return false;
   }
 
   Serial.print("Activating ec_up_b for ");
@@ -2043,21 +2058,22 @@ void runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long
   if (!markControlCycleActionStarted(controlCycleId, "ec_up_b_dosing")) {
     Serial.println("Unable to report EC Up B start. Stopping before the second nutrient pump.");
     enterMonitoringMode();
-    return;
+    return false;
   }
 
   if (!runDosingCountdown(EC_UP_B_PUMP_PIN, durationMs, "ec_up_b")) {
     stopAllPumps();
-    return;
+    return false;
   }
   if (controllerMode == MODE_MONITORING) {
     stopAllPumps();
-    return;
+    return false;
   }
 
   Serial.println("Action complete: ec_up A then B");
 
   startMixingPeriod(mixingTimeMs);
+  return true;
 }
 
 void startMixingPeriod(unsigned long mixingTimeMs) {

@@ -9,6 +9,17 @@ export function controlCycleDisplayState(
     status: cycle.status,
     mixingElapsedSeconds: cycle.mixing_elapsed_seconds,
   }
+  // Each phase owns its own clock; the sequence clock always starts at Pump A.
+  const phaseStart = cycle.status === 'inter_dose_mixing'
+    ? cycle.inter_dose_mixing_started_at
+    : cycle.status === 'mixing' ? cycle.action_completed_at : null
+  if (phaseStart) {
+    const startMs = new Date(phaseStart).getTime()
+    const endMs = cycle.completed_at ? new Date(cycle.completed_at).getTime() : nowMs
+    if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+      return { status: cycle.status, mixingElapsedSeconds: Math.floor(Math.max(0, endMs - startMs) / 1000) }
+    }
+  }
   if (cycle.status !== 'dosing' || cycle.pump_activated === 'none' || !cycle.action_started_at) {
     return fallback
   }
@@ -53,10 +64,10 @@ export function activeOperationCycle(
     || 0
   const pumpSeconds = Math.max(0, Math.ceil(command.duration_ms / 1000))
   const pumpHasFinishedLocally = command.status === 'dosing' && command.age_seconds >= pumpSeconds
-  const isMixing = Boolean(command.action_completed_at)
-    || command.status === 'completed'
+  const isMixing = ['dosing', 'mixing'].includes(command.status)
+    && !command.completed_at && (Boolean(command.action_completed_at)
     || command.status === 'mixing'
-    || (pumpHasFinishedLocally && command.pump_activated !== 'ec_up')
+    || (pumpHasFinishedLocally && command.pump_activated !== 'ec_up'))
   const mixingElapsed = isMixing
     ? command.action_completed_at
       ? command.age_seconds
@@ -73,5 +84,9 @@ export function activeOperationCycle(
     mixing_elapsed_seconds: Math.min(mixingElapsed, mixingDuration),
     action_started_at: command.action_started_at ?? command.timestamp,
     action_completed_at: command.action_completed_at,
+    ec_up_a_started_at: command.ec_up_a_started_at,
+    inter_dose_mixing_started_at: command.inter_dose_mixing_started_at,
+    ec_up_b_started_at: command.ec_up_b_started_at,
+    completed_at: command.completed_at,
   }
 }

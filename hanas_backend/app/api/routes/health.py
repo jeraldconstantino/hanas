@@ -32,6 +32,12 @@ _REQUIRED_NOTIFICATION_COLUMNS = {
     "status_check_count",
 }
 
+_REQUIRED_EXECUTION_COLUMNS = {
+    "ec_up_a_started_at",
+    "inter_dose_mixing_started_at",
+    "ec_up_b_started_at",
+}
+
 
 class _ReadinessError(RuntimeError):
     """A safe, operator-facing category for an incomplete database schema."""
@@ -101,6 +107,18 @@ def read_ready() -> dict[str, str]:
                 )
                 notification_columns = {row[0] for row in cursor.fetchall()}
 
+                cursor.execute(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = %s
+                      AND table_name = 'control_cycles'
+                      AND column_name = ANY(%s);
+                    """,
+                    (settings.db_schema, list(_REQUIRED_EXECUTION_COLUMNS)),
+                )
+                execution_columns = {row[0] for row in cursor.fetchall()}
+
         if not resolved_tables or any(table is None for table in resolved_tables):
             missing = [
                 table
@@ -131,6 +149,14 @@ def read_ready() -> dict[str, str]:
                 "schema_notification_columns_outdated",
                 "Notification columns require migration: "
                 f"{', '.join(missing_notification_columns)}"
+            )
+
+        missing_execution_columns = sorted(_REQUIRED_EXECUTION_COLUMNS - execution_columns)
+        if missing_execution_columns:
+            raise _ReadinessError(
+                "schema_execution_columns_outdated",
+                "Execution timestamp columns require migration: "
+                f"{', '.join(missing_execution_columns)}"
             )
     except _ReadinessError as exc:
         logger.error("Backend readiness check failed: {}", exc)

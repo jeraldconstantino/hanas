@@ -83,7 +83,7 @@ def mark_control_cycle_action_started(
     repository: SensorReadingRepository = Depends(get_sensor_repository),
     _: None = Depends(verify_device_token),
 ) -> ControlCycleCompletionResponse:
-    """Mark the time when the ESP32 starts a dosing action."""
+    """Record sequence start or advance an EC Up stage without resetting its start."""
     if emergency_stop_enabled(repository):
         repository.emergency_stop_active_commands(settings.default_control_strategy)
         raise HTTPException(status_code=409, detail="Emergency stop is enabled; pump start rejected.")
@@ -114,7 +114,7 @@ def complete_control_cycle(
     repository: SensorReadingRepository = Depends(get_sensor_repository),
     _: None = Depends(verify_device_token),
 ) -> ControlCycleCompletionResponse:
-    """Mark a control cycle as completed after ESP32 actuation finishes."""
+    """Record success after post-dose mixing, or terminate an interrupted cycle."""
     try:
         repository.complete_control_cycle(control_cycle_id, payload.status)
     except ControlCycleConflict as exc:

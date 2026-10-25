@@ -311,7 +311,8 @@ def test_read_root() -> None:
     assert response["message"] == "HANAS backend is running"
 
 
-def test_read_ready_confirms_database_and_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize('missing_execution_column', [None, *sorted(health._REQUIRED_EXECUTION_COLUMNS)])
+def test_read_ready_confirms_database_and_schema(monkeypatch: pytest.MonkeyPatch, missing_execution_column: str | None) -> None:
     """The readiness probe requires PostgreSQL and every runtime table."""
     class FakeCursor:
         query_number = 0
@@ -330,10 +331,14 @@ def test_read_ready_confirms_database_and_schema(monkeypatch: pytest.MonkeyPatch
             elif self.query_number == 2:
                 assert "information_schema.columns" in query
                 assert params == (settings.db_schema, ["control_cycles", "system_logs"])
-            else:
+            elif self.query_number == 3:
                 assert "notification_logs" in query
                 assert params[0] == settings.db_schema
                 assert set(params[1]) == health._REQUIRED_NOTIFICATION_COLUMNS
+            else:
+                assert "control_cycles" in query
+                assert params[0] == settings.db_schema
+                assert set(params[1]) == health._REQUIRED_EXECUTION_COLUMNS
 
         def fetchone(self) -> tuple[str, ...]:
             return tuple(f"table_{index}" for index in range(6))
@@ -341,6 +346,8 @@ def test_read_ready_confirms_database_and_schema(monkeypatch: pytest.MonkeyPatch
         def fetchall(self) -> list[tuple[str, int]]:
             if self.query_number == 2:
                 return [("control_cycles", 64), ("system_logs", 64)]
+            if self.query_number == 4:
+                return [(column,) for column in health._REQUIRED_EXECUTION_COLUMNS if column != missing_execution_column]
             return [(column,) for column in health._REQUIRED_NOTIFICATION_COLUMNS]
 
     class FakeConnection:
@@ -352,6 +359,13 @@ def test_read_ready_confirms_database_and_schema(monkeypatch: pytest.MonkeyPatch
         yield FakeConnection()
 
     monkeypatch.setattr(health, "get_db_connection", fake_connection)
+
+    if missing_execution_column:
+        with pytest.raises(HTTPException) as exc_info:
+            read_ready()
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail['reason'] == 'schema_execution_columns_outdated'
+        return
 
     response = read_ready()
     assert response == {
@@ -601,12 +615,11 @@ def test_pending_command_query_blocks_dispatch_during_physical_activity() -> Non
     assert "default_mixing_time_seconds" in source
 
 
-def test_latest_cycle_derives_mixing_for_older_firmware_completion() -> None:
-    """An early completion report must still expose the active mixing window."""
+def test_latest_cycle_preserves_confirmed_completion() -> None:
+    """Confirmed cycle completion must not restart the mixing display."""
     source = inspect.getsource(PostgresSensorReadingRepository.get_latest_control_cycle)
 
-    assert "= 'completed'" in source
-    assert "THEN 'mixing'" in source
+    assert "THEN 'mixing'" not in source
     assert "action_completed_at" in source
     assert "mixing_effective_seconds" in source
 

@@ -93,32 +93,60 @@ int main() {
     subprocess.run([str(binary)],check=True,capture_output=True,text=True,timeout=5)
 
 
-def test_rejected_second_nutrient_pump_leaves_sequence_interrupted(tmp_path):
+def test_ec_up_sequence_success_and_interruptions(tmp_path):
     compiler = shutil.which('g++')
     if not compiler:
         pytest.skip('Native C++ compiler is unavailable')
     source = (Path(__file__).resolve().parents[2] / 'embedded_system/hanas_sensor_controller/hanas_sensor_controller.ino').read_text()
-    start = source.index('void runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long mixingTimeMs) {')
+    start = source.index('bool runEcUpSequence(int controlCycleId, unsigned long durationMs, unsigned long mixingTimeMs) {')
     end = source.index('\nvoid startMixingPeriod(', start)
     harness = r'''
 #include <cassert>
 #include <string>
+#include <vector>
 using String = std::string;
 struct SerialStub { template<class T> void print(T) {} template<class T> void println(T) {} } Serial;
 constexpr int MODE_MONITORING=0, MODE_FULL_CONTROL=1;
 constexpr int EC_UP_A_PUMP_PIN=1, EC_UP_B_PUMP_PIN=2;
 constexpr unsigned long EC_UP_INTER_DOSE_MIXING_DURATION_MS=60000;
-int controllerMode=MODE_FULL_CONTROL, pulses=0;
+int controllerMode=MODE_FULL_CONTROL;
+std::string failure;
+std::vector<std::string> events;
 bool mixingStarted=false;
 void stopAllPumps() {}
 void enterMonitoringMode() { controllerMode=MODE_MONITORING; }
-bool runDosingCountdown(int pin,unsigned long,const String&) { assert(pin==EC_UP_A_PUMP_PIN); ++pulses; return true; }
-bool markControlCycleActionStarted(int,const char* status) { return std::string(status)!="ec_up_b_dosing"; }
-bool runInterDoseMixingCountdown(unsigned long) { return true; }
-void startMixingPeriod(unsigned long) { mixingStarted=true; }
+bool runDosingCountdown(int pin,unsigned long,const String&) {
+  const std::string event=pin==EC_UP_A_PUMP_PIN ? "A" : "B";
+  events.push_back(event);
+  return failure!=event;
+}
+bool markControlCycleActionStarted(int,const char* stage) {
+  events.push_back(stage);
+  return failure!=stage;
+}
+bool runInterDoseMixingCountdown(unsigned long) {
+  events.push_back("delay");
+  if(failure=="monitoring") controllerMode=MODE_MONITORING;
+  return failure!="delay" && failure!="monitoring";
+}
+void startMixingPeriod(unsigned long) { events.push_back("post_mix"); mixingStarted=true; }
 '''
     harness += source[start:end]
-    harness += '\nint main() { runEcUpSequence(1,100,60000); assert(pulses==1); assert(controllerMode==MODE_MONITORING); assert(!mixingStarted); }'
+    harness += r'''
+int main() {
+  assert(runEcUpSequence(1,100,60000));
+  assert((events==std::vector<std::string>{"A","inter_dose_mixing","delay","ec_up_b_dosing","B","post_mix"}));
+  assert(mixingStarted);
+  for(const auto& failed: {"A","inter_dose_mixing","delay","ec_up_b_dosing","B","monitoring"}) {
+    failure=failed; events.clear(); mixingStarted=false; controllerMode=MODE_FULL_CONTROL;
+    assert(!runEcUpSequence(1,100,60000));
+    assert(!mixingStarted);
+    if(failure!="B") {
+      for(const auto& event: events) assert(event!="B");
+    }
+  }
+}
+'''
     path = tmp_path / 'ec_sequence.cpp'
     path.write_text(harness)
     binary = tmp_path / 'ec_sequence'

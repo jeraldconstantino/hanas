@@ -635,27 +635,16 @@ class PostgresSensorReadingRepository:
                     """
                 SELECT
                     control_cycles.id,
-                    CASE
-                        WHEN COALESCE(control_cycles.status, system_logs.status) = 'completed'
-                            AND control_cycles.action_completed_at IS NOT NULL
-                            AND COALESCE(system_logs.mixing_effective_seconds, 0) > 0
-                            AND control_cycles.action_completed_at
-                                + (
-                                    COALESCE(system_logs.mixing_effective_seconds, 0)
-                                    * INTERVAL '1 second'
-                                ) > CURRENT_TIMESTAMP
-                            THEN 'mixing'
-                        ELSE COALESCE(control_cycles.status, system_logs.status, 'unknown')
-                    END AS status,
+                    COALESCE(control_cycles.status, system_logs.status, 'unknown') AS status,
                     COALESCE(system_logs.pump_activated, 'none') AS pump_activated,
                     COALESCE(system_logs.dose_ml, 0) AS dose_ml,
                     COALESCE(system_logs.duration_ms, 0) AS duration_ms,
                     COALESCE(system_logs.mixing_effective_seconds, 0) AS mixing_duration_seconds,
                     CASE
                         WHEN COALESCE(control_cycles.status, system_logs.status) = 'inter_dose_mixing'
-                            AND control_cycles.action_started_at IS NOT NULL
+                            AND control_cycles.inter_dose_mixing_started_at IS NOT NULL
                             THEN GREATEST(
-                                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - control_cycles.action_started_at)),
+                                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - control_cycles.inter_dose_mixing_started_at)),
                                 0
                             )
                         WHEN control_cycles.action_started_at IS NULL
@@ -678,7 +667,11 @@ class PostgresSensorReadingRepository:
                         )
                     END AS mixing_elapsed_seconds,
                     COALESCE(control_cycles.action_started_at, control_cycles.started_at) AS action_started_at,
-                    control_cycles.action_completed_at
+                    control_cycles.action_completed_at,
+                    control_cycles.ec_up_a_started_at,
+                    control_cycles.inter_dose_mixing_started_at,
+                    control_cycles.ec_up_b_started_at,
+                    control_cycles.completed_at
                 FROM {} AS control_cycles
                 LEFT JOIN {} AS system_logs
                     ON system_logs.control_cycle_id = control_cycles.id
@@ -703,130 +696,72 @@ class PostgresSensorReadingRepository:
             mixing_elapsed_seconds=round(float(row[6] or 0)),
             action_started_at=row[7].isoformat(),
             action_completed_at=action_completed_at,
+            ec_up_a_started_at=row[9].isoformat() if row[9] else None,
+            inter_dose_mixing_started_at=row[10].isoformat() if row[10] else None,
+            ec_up_b_started_at=row[11].isoformat() if row[11] else None,
+            completed_at=row[12].isoformat() if row[12] else None,
         )
 
-    def mark_control_cycle_action_started(
-        self,
-        control_cycle_id: int,
-        status: str = "dosing",
-    ) -> None:
-        """Mark the moment the ESP32 starts dosing actuation."""
+    def _record_execution_event(self, control_cycle_id: int, event: str) -> None:
+        """Serialize callbacks so retries cannot reset clocks or regress execution."""
         with self._connection.cursor() as cursor:
             cursor.execute(
-                sql.SQL(
-                    """
-                UPDATE {}
-                AS cycle SET action_started_at = CASE
-                        WHEN status = %s THEN COALESCE(action_started_at, CURRENT_TIMESTAMP)
-                        WHEN %s IN ('inter_dose_mixing', 'ec_up_b_dosing')
-                            THEN CURRENT_TIMESTAMP
-                        ELSE COALESCE(action_started_at, CURRENT_TIMESTAMP)
-                    END,
-                    status = %s
-                WHERE id = %s AND status NOT IN ('completed', 'completed_estimated', 'emergency_stopped', 'cancelled', 'batch_expired', 'rejected', 'human_rejected', 'error', 'failed')
-                    AND action_completed_at IS NULL
-                    AND (
-                        (%s = 'dosing' AND status IN ('dosing', 'batch_dispatched', 'human_command_dispatched'))
-                        OR (%s = 'inter_dose_mixing' AND status IN ('dosing', 'inter_dose_mixing'))
-                        OR (%s = 'ec_up_b_dosing' AND status IN ('inter_dose_mixing', 'ec_up_b_dosing'))
-                    )
-                    AND EXISTS (
-                        SELECT 1 FROM {} AS command
-                        WHERE command.control_cycle_id = cycle.id
-                            AND command.pump_activated <> 'none'
-                            AND command.duration_ms > 0
-                            AND (%s = 'dosing' OR command.pump_activated = 'ec_up')
-                    )
-                RETURNING id;
-                    """
-                ).format(self._table("control_cycles"), self._table("system_logs")),
-                (status, status, status, control_cycle_id, status, status, status, status),
+                sql.SQL("""
+                    SELECT cycle.status, command.pump_activated, command.duration_ms,
+                        cycle.action_started_at, cycle.ec_up_a_started_at,
+                        cycle.inter_dose_mixing_started_at, cycle.ec_up_b_started_at,
+                        cycle.action_completed_at, cycle.completed_at
+                    FROM {} AS cycle
+                    LEFT JOIN {} AS command ON command.control_cycle_id = cycle.id
+                    WHERE cycle.id = %s
+                    FOR UPDATE OF cycle;
+                """).format(self._table("control_cycles"), self._table("system_logs")),
+                (control_cycle_id,),
             )
-            if cursor.fetchone() is None:
+            row = cursor.fetchone()
+            if row is None:
                 raise ControlCycleConflict("Cycle is missing or its state no longer permits this callback.")
-            cursor.execute(
-                sql.SQL(
-                    """
-                UPDATE {}
-                SET status = %s
-                WHERE control_cycle_id = %s
-                    AND pump_activated <> 'none';
-                    """
-                ).format(self._table("system_logs")),
-                (status, control_cycle_id),
-            )
-
+            fields = _execution_event_fields(row, event)
+            if fields:
+                assignments = [sql.SQL("{} = COALESCE({}, statement_timestamp())").format(
+                    sql.Identifier(field), sql.Identifier(field)
+                ) for field in fields]
+                assignments.append(sql.SQL("status = %s"))
+                cursor.execute(
+                    sql.SQL("UPDATE {} SET {} WHERE id = %s;").format(
+                        self._table("control_cycles"), sql.SQL(", ").join(assignments)
+                    ),
+                    (event, control_cycle_id),
+                )
+                cursor.execute(
+                    sql.SQL("UPDATE {} SET status = %s WHERE control_cycle_id = %s AND pump_activated <> 'none';").format(
+                        self._table("system_logs")
+                    ),
+                    (event, control_cycle_id),
+                )
         self._connection.commit()
+
+    def mark_control_cycle_action_started(
+        self, control_cycle_id: int, status: str = "dosing",
+    ) -> None:
+        """Record sequence start or the next EC Up stage before activation."""
+        if status not in {"dosing", "inter_dose_mixing", "ec_up_b_dosing"}:
+            raise ControlCycleConflict("Invalid action-started stage.")
+        self._record_execution_event(control_cycle_id, status)
 
     def complete_control_cycle(self, control_cycle_id: int, status: str = "completed") -> None:
-        """Mark a control cycle complete."""
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                sql.SQL(
-                    """
-                UPDATE {}
-                SET completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
-                    action_completed_at = CASE
-                        WHEN action_started_at IS NULL THEN action_completed_at
-                        ELSE COALESCE(action_completed_at, CURRENT_TIMESTAMP)
-                    END,
-                    status = %s
-                WHERE id = %s AND (status NOT IN ('completed', 'completed_estimated', 'emergency_stopped', 'cancelled', 'batch_expired', 'rejected', 'human_rejected', 'error', 'failed') OR status = %s)
-                RETURNING id;
-                    """
-                ).format(self._table("control_cycles")),
-                (status, control_cycle_id, status),
-            )
-            if cursor.fetchone() is None:
-                raise ControlCycleConflict("Cycle is missing or its state no longer permits this callback.")
-            cursor.execute(
-                sql.SQL(
-                    """
-                UPDATE {}
-                SET status = %s
-                WHERE control_cycle_id = %s
-                    AND pump_activated <> 'none';
-                    """
-                ).format(self._table("system_logs")),
-                (status, control_cycle_id),
-            )
-
-        self._connection.commit()
+        """Record cycle completion after mixing, or terminate an interrupted cycle."""
+        if status not in {"completed", "error", "emergency_stopped"}:
+            raise ControlCycleConflict("Invalid completion status.")
+        self._record_execution_event(control_cycle_id, status)
 
     def mark_control_cycle_action_completed(
-        self,
-        control_cycle_id: int,
-        status: str = "mixing",
+        self, control_cycle_id: int, status: str = "mixing",
     ) -> None:
-        """Mark pump shutdown without completing the post-dose mixing cycle."""
-        with self._connection.cursor() as cursor:
-            cursor.execute(
-                sql.SQL(
-                    """
-                UPDATE {}
-                SET action_completed_at = COALESCE(action_completed_at, CURRENT_TIMESTAMP),
-                    status = %s
-                WHERE id = %s AND status NOT IN ('completed', 'completed_estimated', 'emergency_stopped', 'cancelled', 'batch_expired', 'rejected', 'human_rejected', 'error', 'failed') AND action_started_at IS NOT NULL
-                RETURNING id;
-                    """
-                ).format(self._table("control_cycles")),
-                (status, control_cycle_id),
-            )
-            if cursor.fetchone() is None:
-                raise ControlCycleConflict("Cycle is missing or its state no longer permits this callback.")
-            cursor.execute(
-                sql.SQL(
-                    """
-                UPDATE {}
-                SET status = %s
-                WHERE control_cycle_id = %s
-                    AND pump_activated <> 'none';
-                    """
-                ).format(self._table("system_logs")),
-                (status, control_cycle_id),
-            )
-
-        self._connection.commit()
+        """Record final pump shutdown separately from post-dose mixing completion."""
+        if status != "mixing":
+            raise ControlCycleConflict("Invalid action-completed stage.")
+        self._record_execution_event(control_cycle_id, status)
 
     def emergency_stop_active_commands(self, control_strategy: str) -> int:
         """Resolve pending or active pump commands when the operator engages emergency stop."""
@@ -842,8 +777,7 @@ class PostgresSensorReadingRepository:
                 WITH stopped AS (
                     UPDATE {} AS control_cycles
                     SET status = 'emergency_stopped',
-                        completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
-                        action_completed_at = COALESCE(action_completed_at, CURRENT_TIMESTAMP)
+                        completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
                     FROM {} AS system_logs
                     WHERE system_logs.control_cycle_id = control_cycles.id
                         AND system_logs.experiment_run_id = %s
@@ -909,8 +843,7 @@ class PostgresSensorReadingRepository:
                 WITH cancelled AS (
                     UPDATE {} AS control_cycles
                     SET status = %s,
-                        completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
-                        action_completed_at = COALESCE(action_completed_at, CURRENT_TIMESTAMP)
+                        completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
                     FROM {} AS system_logs
                     WHERE system_logs.control_cycle_id = control_cycles.id
                         AND system_logs.experiment_run_id = %s
@@ -1490,7 +1423,7 @@ class PostgresSensorReadingRepository:
                 WITH expired AS (
                     UPDATE {} AS control_cycles
                     SET status = 'batch_expired',
-                        action_completed_at = COALESCE(action_completed_at, CURRENT_TIMESTAMP)
+                        completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
                     FROM {} AS system_logs
                     WHERE system_logs.control_cycle_id = control_cycles.id
                         AND system_logs.experiment_run_id = %s
@@ -1852,7 +1785,11 @@ class PostgresSensorReadingRepository:
                                 )
                             )
                         )
-                    )::INT AS age_seconds
+                    )::INT AS age_seconds,
+                    control_cycles.ec_up_a_started_at,
+                    control_cycles.inter_dose_mixing_started_at,
+                    control_cycles.ec_up_b_started_at,
+                    control_cycles.completed_at
                 FROM {} AS system_logs
                 INNER JOIN {} AS control_cycles
                     ON control_cycles.id = system_logs.control_cycle_id
@@ -1917,6 +1854,10 @@ class PostgresSensorReadingRepository:
             "mixing_duration_seconds": int(row[10] or 0),
             "triggered_by": row[11],
             "age_seconds": int(row[12] or 0),
+            "ec_up_a_started_at": row[13].isoformat() if row[13] else None,
+            "inter_dose_mixing_started_at": row[14].isoformat() if row[14] else None,
+            "ec_up_b_started_at": row[15].isoformat() if row[15] else None,
+            "completed_at": row[16].isoformat() if row[16] else None,
         }
 
     def get_latest_batch_analysis(self, control_strategy: str) -> dict[str, Any] | None:
@@ -2283,6 +2224,70 @@ def _approved_original_decision(original: dict, payload: HumanReviewPayload) -> 
 
 class ControlCycleConflict(ValueError):
     """A delayed or invalid device callback cannot change the current cycle."""
+
+
+def _execution_event_fields(row: tuple, event: str) -> list[str]:
+    """Validate the persisted execution state; return clocks to set once.
+
+    `dosing` is Pump A for EC Up and the sole pump for other commands.
+    The inter-dose callback confirms A shutdown; `mixing` confirms B shutdown.
+    """
+    current, pump, duration, started, a_started, inter_started, b_started, action_done, done = row
+    failures = {"emergency_stopped", "cancelled", "batch_expired", "rejected",
+                "human_rejected", "error", "failed", "completed_estimated"}
+    conflict = "Cycle is missing or its state no longer permits this callback."
+    if current in failures:
+        if event == current and event in {"error", "emergency_stopped"}:
+            return []
+        raise ControlCycleConflict(conflict)
+    if event in {"error", "emergency_stopped"}:
+        if current == "completed":
+            raise ControlCycleConflict(conflict)
+        # Interruption ends the cycle without claiming final pump shutdown success.
+        return ["completed_at"]
+
+    has_pump = pump is not None and pump != "none" and (duration or 0) > 0
+    if event == "dosing":
+        if started is not None:
+            return []
+        if not has_pump or current not in {"dosing", "batch_dispatched", "human_command_dispatched"}:
+            raise ControlCycleConflict(conflict)
+        return ["action_started_at", "ec_up_a_started_at"] if pump == "ec_up" else ["action_started_at"]
+    if event in {"inter_dose_mixing", "ec_up_b_dosing"}:
+        if pump != "ec_up" or started is None or a_started is None:
+            raise ControlCycleConflict(conflict)
+        if event == "inter_dose_mixing":
+            if inter_started is not None:
+                return []
+            if current == "dosing" and action_done is None:
+                return ["inter_dose_mixing_started_at"]
+        else:
+            if b_started is not None:
+                return []
+            if current == "inter_dose_mixing" and inter_started is not None and action_done is None:
+                return ["ec_up_b_started_at"]
+        raise ControlCycleConflict(conflict)
+    if event == "mixing":
+        if action_done is not None:
+            return []
+        expected = "ec_up_b_dosing" if pump == "ec_up" else "dosing"
+        if not has_pump or started is None or current != expected:
+            raise ControlCycleConflict(conflict)
+        if pump == "ec_up" and any(value is None for value in (a_started, inter_started, b_started)):
+            raise ControlCycleConflict(conflict)
+        return ["action_completed_at"]
+    if event == "completed":
+        if current == "completed" and done is not None:
+            return []
+        if has_pump:
+            if current != "mixing" or action_done is None:
+                raise ControlCycleConflict(conflict)
+            if pump == "ec_up" and any(value is None for value in (started, a_started, inter_started, b_started)):
+                raise ControlCycleConflict(conflict)
+        elif current in {"batch_pending", "human_approved_pending_execution", "human_override_pending_execution", "wait_human_review"}:
+            raise ControlCycleConflict(conflict)
+        return ["completed_at"]
+    raise ControlCycleConflict(conflict)
 
 
 class InvalidHumanReview(ValueError):

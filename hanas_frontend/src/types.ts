@@ -149,6 +149,10 @@ export type SystemSettings = {
 }
 
 export type BatchUnresolvedCommand = {
+  ec_up_a_started_at?: string | null
+  inter_dose_mixing_started_at?: string | null
+  ec_up_b_started_at?: string | null
+  completed_at?: string | null
   control_cycle_id: number
   system_log_id: number
   timestamp: string | null
@@ -252,6 +256,10 @@ export type OverviewSummaryStatus = {
 }
 
 export type ControlCycle = {
+  ec_up_a_started_at?: string | null
+  inter_dose_mixing_started_at?: string | null
+  ec_up_b_started_at?: string | null
+  completed_at?: string | null
   id: number
   status: string
   pump_activated: string

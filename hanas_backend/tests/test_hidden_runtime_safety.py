@@ -88,8 +88,7 @@ def test_rejected_callback_does_not_update_logs_or_commit(method):
     repo=PostgresSensorReadingRepository(Connection())
     with pytest.raises(ControlCycleConflict):getattr(repo,method)(1)
     assert len(cursor.calls)==1
-    assert 'emergency_stopped' in str(cursor.calls[0][0])
-    assert 'batch_expired' in str(cursor.calls[0][0])
+    assert 'FOR UPDATE OF cycle' in str(cursor.calls[0][0])
 
 
 @pytest.mark.parametrize('status',['cancelled','emergency_stopped','human_rejected','completed'])

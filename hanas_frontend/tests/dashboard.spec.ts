@@ -163,7 +163,7 @@ test('pH and EC corrections keep the correct post-dose timer state', () => {
         control_cycle_id: dosedCycle.id,
         system_log_id: 680 + index,
         timestamp: new Date(actionStartedMs).toISOString(),
-        status: 'completed',
+        status: 'mixing',
         action_started_at: new Date(actionStartedMs).toISOString(),
         action_completed_at: new Date(actionStartedMs + 7_000).toISOString(),
         decision: correction.decision,
